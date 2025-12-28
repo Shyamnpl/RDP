@@ -111,7 +111,7 @@ jobs:
         run: |
           Write-Host "=========================="
           Write-Host "RDP IP : $env:TAILSCALE_IP"
-          Write-Host "USER   : RDP"
+          Write-Host "USER   : SKM"
           Write-Host "PASS   : SK@12345"
           Write-Host "=========================="
 
