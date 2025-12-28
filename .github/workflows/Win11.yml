@@ -1,10 +1,11 @@
-name: SK SERVER
+name: WIN 11
 
 on:
   workflow_dispatch:
 
 jobs:
-  Click-Me!!:
+  SK-Run:
+    name: Click Me!!
     runs-on: windows-latest
     timeout-minutes: 3600
 
@@ -25,12 +26,13 @@ jobs:
 
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP User (Fixed Password)
+      - name: Create RDP User
         run: |
           $password = ConvertTo-SecureString "SK@12345" -AsPlainText -Force
-          New-LocalUser -Name "RDP" -Password $password -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+          # Changed username to SKM
+          New-LocalUser -Name "SKM" -Password $password -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "SKM"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "SKM"
 
           echo "RDP_USER=SKM" >> $env:GITHUB_ENV
           echo "RDP_PASS=SK@12345" >> $env:GITHUB_ENV
@@ -109,7 +111,7 @@ jobs:
         run: |
           Write-Host "=========================="
           Write-Host "RDP IP : $env:TAILSCALE_IP"
-          Write-Host "USER   : SKM"
+          Write-Host "USER   : RDP"
           Write-Host "PASS   : SK@12345"
           Write-Host "=========================="
 
