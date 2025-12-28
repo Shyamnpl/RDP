@@ -1,13 +1,14 @@
 name: RDP
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 
-jobs: secure-rdp: runs-on: windows-latest timeout-minutes: 3600
-
-steps:
-  - name: Configure Core RDP Settings
-    run: |
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - name: Test
+        run: echo "YAML is OK"
       # Enable Remote Desktop and disable Network Level Authentication (if needed)
       Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
                          -Name "fDenyTSConnections" -Value 0 -Force
