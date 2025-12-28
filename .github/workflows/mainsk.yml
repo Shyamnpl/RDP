@@ -60,23 +60,31 @@ jobs:
             exit 1
           }
 
-      - name: Install Softwares and Configure Auto-Start
+      - name: Install Softwares (WinRAR & LibreOffice) and Configure Auto-Start
         run: |
-          # 1. Install WinRAR, Chrome and Office (Word/Excel)
-          # Note: Office install takes time. MS Paint is built-in.
-          choco install winrar googlechrome -y --no-progress
-          choco install office365proplus -y --no-progress --params "'/Quiet'"
+          # --- CHECK SIZE OF MUMU INSTALLER ---
+          $mumuPath = "$env:MUMU_INSTALLER_PATH"
+          if (Test-Path $mumuPath) {
+            $size = (Get-Item $mumuPath).Length / 1MB
+            $sizeFormatted = "{0:N2}" -f $size
+            Write-Host "SIZE CHECK: MuMu Installer size is $sizeFormatted MB"
+          }
 
-          # 2. Configure Auto-Open URL on RDP Login
-          # Hum 'All Users' startup folder use kar rahe hain taki RDP user login karte hi chal jaye
+          # --- INSTALL LIGHTWEIGHT OFFICE & WINRAR ---
+          # MS Office is 3GB+ (Too slow). LibreOffice is ~300MB (Fast).
+          # LibreOffice can open Excel (.xlsx) and Word (.docx) files.
+          Write-Host "Installing WinRAR and LibreOffice (Excel/Word Alternative)..."
+          choco install winrar libreoffice-fresh -y --no-progress
+
+          # --- CONFIGURE AUTO-START ---
           $startupPath = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp"
           $batFile = "$startupPath\OpenYT.bat"
           
-          # Script to open Chrome with specific URL
+          # Script to open Chrome with specific URL immediately
           $content = 'start chrome "https://youtube.com/@factstreamzs?si=MrzcBbz4UPPcs_9q" --new-window --start-maximized'
           Set-Content -Path $batFile -Value $content -Encoding Ascii
           
-          Write-Host "Software installed and Auto-Start configured."
+          Write-Host "Softwares installed. Note: Use LibreOffice to open Excel files."
 
       - name: Establish Tailscale Connection
         run: |
