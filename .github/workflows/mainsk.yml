@@ -1,188 +1,88 @@
 name: RDP
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 jobs:
-  test:
+  secure-rdp:
     runs-on: windows-latest
+    timeout-minutes: 3600
+
     steps:
-      - name: Test
-        run: echo "YAML is OK"
-      # Enable Remote Desktop and disable Network Level Authentication (if needed)
-      Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                         -Name "fDenyTSConnections" -Value 0 -Force
-      Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                         -Name "UserAuthentication" -Value 0 -Force
-      Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                         -Name "SecurityLayer" -Value 0 -Force
+      - name: Configure Core RDP Settings
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name "fDenyTSConnections" -Value 0 -Force
 
-      # Remove any existing rule with the same name to avoid duplication
-      netsh advfirewall firewall delete rule name="RDP-Tailscale"
-      
-      # For testing, allow any incoming connection on port 3389
-      netsh advfirewall firewall add rule name="RDP-Tailscale" `
-        dir=in action=allow protocol=TCP localport=3389
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name "UserAuthentication" -Value 0 -Force
 
-      # (Optional) Restart the Remote Desktop service to ensure changes take effect
-      Restart-Service -Name TermService -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name "SecurityLayer" -Value 0 -Force
 
-  - name: Create RDP User with FIXED Password
-    run: |
-      # NOTE: You asked for a fixed password. This is insecure and not recommended.
-      $username = "ADMIN"
-      $passwordPlain = 'SK'    # fixed password as requested
+          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
 
-      # If user exists, remove to avoid duplicate errors (optional)
-      if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
-          Remove-LocalUser -Name $username -ErrorAction SilentlyContinue
-      }
+          Restart-Service -Name TermService -Force
 
-      $securePass = ConvertTo-SecureString $passwordPlain -AsPlainText -Force
-      New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -PasswordNeverExpires
-      Add-LocalGroupMember -Group "Administrators" -Member $username
-      Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
+      - name: Create RDP User (Fixed Password)
+        run: |
+          $password = ConvertTo-SecureString "SK" -AsPlainText -Force
+          New-LocalUser -Name "RDP" -Password $password -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
 
-      echo "RDP_CREDS=User: $username | Password: $passwordPlain" >> $env:GITHUB_ENV
+          echo "RDP_USER=RDP" >> $env:GITHUB_ENV
+          echo "RDP_PASS=SK" >> $env:GITHUB_ENV
 
-      if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
-          Write-Error "User creation failed"
-          exit 1
-      }
+      - name: Install Tailscale
+        run: |
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $path = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest $url -OutFile $path
+          Start-Process msiexec.exe -ArgumentList "/i `"$path`" /quiet /norestart" -Wait
+          Remove-Item $path -Force
 
-  - name: Prepare package manager (Chocolatey) and basic tools
-    shell: powershell
-    run: |
-      Set-ExecutionPolicy Bypass -Scope Process -Force
-      iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-      choco feature enable -n allowGlobalConfirmation
-      choco install -y 7zip.install libreoffice-fresh
+      - name: Install MuMu Player Emulator
+        run: |
+          $mumuUrl = "https://adl.easebar.com/d/g/mumu/c/mumuglobal?type=pc&direct=1"
+          $installer = "$env:TEMP\mumu.exe"
 
-  - name: Install MuMuPlayer (installer URL must be set in repo secret MUMU_URL)
-    shell: powershell
-    env:
-      MUMU_URL: ${{ secrets.MUMU_URL }}
-    run: |
-      if (-not $env:MUMU_URL) {
-          Write-Host "MUMU_URL secret is not set. Skipping MuMu install. To install automatically, add MUMU_URL secret with the direct installer URL."
-      } else {
-          $mumuUrl = $env:MUMU_URL
-          $installer = "$env:TEMP\mumu_installer.exe"
-          Invoke-WebRequest -Uri $mumuUrl -OutFile $installer -UseBasicParsing
+          Invoke-WebRequest -Uri $mumuUrl -OutFile $installer
 
-          # Attempt silent install with common switches; different versions use different switches
-          $installed = $false
-          try {
-              Start-Process -FilePath $installer -ArgumentList '/S' -Wait -ErrorAction SilentlyContinue
-              $installed = $true
-          } catch {
-              Write-Host "Silent /S failed, trying /silent"
-          }
-          if (-not $installed) {
-              try { Start-Process -FilePath $installer -ArgumentList '/silent' -Wait -ErrorAction SilentlyContinue; $installed = $true } catch {}
-          }
-          if (-not $installed) {
-              Start-Process -FilePath $installer -Wait -ErrorAction SilentlyContinue
+          # Silent install
+          Start-Process -FilePath $installer -ArgumentList "/S" -Wait
+
+          Remove-Item $installer -Force
+
+      - name: Establish Tailscale Connection
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
+            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
+            --hostname=gh-runner-$env:GITHUB_RUN_ID
+
+          $ip = $null
+          for ($i=0; $i -lt 10; $i++) {
+            $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+            if ($ip) { break }
+            Start-Sleep 5
           }
 
-          Remove-Item $installer -Force -ErrorAction SilentlyContinue
+          if (-not $ip) { exit 1 }
+          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
 
-          # Create desktop shortcut if executable found
-          $possibleExe = Get-ChildItem 'C:\Program Files','C:\Program Files (x86)' -Filter '*mumu*.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($possibleExe) {
-              $target = $possibleExe.FullName
-              $WshShell = New-Object -ComObject WScript.Shell
-              $lnk = $WshShell.CreateShortcut("$env:PUBLIC\Desktop\MuMuPlayer.lnk")
-              $lnk.TargetPath = $target
-              $lnk.WorkingDirectory = Split-Path $target
-              $lnk.Save()
-          } else {
-              Write-Host "Could not find MuMu exe to create desktop shortcut."
+      - name: Verify RDP
+        run: |
+          Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
+
+      - name: Maintain Connection
+        run: |
+          Write-Host "=========================="
+          Write-Host "RDP IP : $env:TAILSCALE_IP"
+          Write-Host "USER   : RDP"
+          Write-Host "PASS   : SK"
+          Write-Host "=========================="
+
+          while ($true) {
+            Start-Sleep 300
           }
-      }
-
-  - name: Install Tailscale
-    run: |
-      $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-      $installerPath = "$env:TEMP\tailscale.msi"
-      Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-      Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-      Remove-Item $installerPath -Force
-
-  - name: Establish Tailscale Connection
-    run: |
-      & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-      $tsIP = $null
-      $retries = 0
-      while (-not $tsIP -and $retries -lt 10) {
-          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-          Start-Sleep -Seconds 5
-          $retries++
-      }
-      if (-not $tsIP) {
-          Write-Error "Tailscale IP not assigned. Exiting."
-          exit 1
-      }
-      echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-
-  - name: Verify RDP Accessibility
-    run: |
-      Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-      $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
-      if (-not $testResult.TcpTestSucceeded) {
-          Write-Error "TCP connection to RDP port 3389 failed"
-          exit 1
-      }
-      Write-Host "TCP connectivity successful!"
-
-  - name: Create Desktop Shortcuts for LibreOffice and 7-Zip (if present)
-    shell: powershell
-    run: |
-      $WshShell = New-Object -ComObject WScript.Shell
-
-      $libWriter = Get-ChildItem 'C:\Program Files','C:\Program Files (x86)' -Filter 'swriter.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-      if ($libWriter) {
-          $lnk = $WshShell.CreateShortcut("$env:PUBLIC\Desktop\LibreWriter.lnk")
-          $lnk.TargetPath = $libWriter.FullName
-          $lnk.Save()
-      }
-
-      $libCalc = Get-ChildItem 'C:\Program Files','C:\Program Files (x86)' -Filter 'scalc.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-      if ($libCalc) {
-          $lnk = $WshShell.CreateShortcut("$env:PUBLIC\Desktop\LibreCalc.lnk")
-          $lnk.TargetPath = $libCalc.FullName
-          $lnk.Save()
-      }
-
-      $seven = Get-Command 7z.exe -ErrorAction SilentlyContinue
-      if ($seven) {
-          $lnk = $WshShell.CreateShortcut("$env:PUBLIC\Desktop\7-Zip.lnk")
-          $lnk.TargetPath = $seven.Path
-          $lnk.Save()
-      }
-
-  - name: (Optional) Try to apply Windows updates (best-effort)
-    shell: powershell
-    run: |
-      try {
-          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -ErrorAction SilentlyContinue
-          Install-Module -Name PSWindowsUpdate -Force -SkipPublisherCheck -ErrorAction SilentlyContinue
-          Import-Module PSWindowsUpdate -ErrorAction SilentlyContinue
-          # Do not force reboot in CI; install and ignore pending reboot
-          Get-WindowsUpdate -AcceptAll -Install -IgnoreReboot -ErrorAction SilentlyContinue
-      } catch {
-          Write-Host "Windows Update step failed or is not permitted on runner. Continuing."
-      }
-
-  - name: Maintain Connection
-    run: |
-      Write-Host "`n=== SK SERVER ACCESS ==="
-      Write-Host "Address: $env:TAILSCALE_IP"
-      Write-Host "Username: ADMIN"
-      Write-Host "Password: SK"
-      Write-Host "==================`n"
-
-      while ($true) {
-          Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
-          Start-Sleep -Seconds 300
-      }
