@@ -43,17 +43,22 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i `"$path`" /quiet /norestart" -Wait
           Remove-Item $path -Force
 
-      - name: Install MuMu Player Emulator
+      - name: Download MuMu Player Installer Only
         run: |
           $mumuUrl = "https://adl.easebar.com/d/g/mumu/c/mumuglobal?type=pc&direct=1"
-          $installer = "$env:TEMP\mumu.exe"
 
-          Invoke-WebRequest -Uri $mumuUrl -OutFile $installer
+          $savePath = "C:\Users\Public\Desktop\MuMuInstaller.exe"
 
-          # Silent install
-          Start-Process -FilePath $installer -ArgumentList "/S" -Wait
+          Invoke-WebRequest -Uri $mumuUrl -OutFile $savePath
 
-          Remove-Item $installer -Force
+          if (Test-Path $savePath) {
+            Write-Host "MuMu Installer downloaded successfully!"
+            Write-Host "FILE PATH: $savePath"
+            echo "MUMU_INSTALLER_PATH=$savePath" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "MuMu download failed"
+            exit 1
+          }
 
       - name: Establish Tailscale Connection
         run: |
