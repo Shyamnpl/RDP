@@ -60,6 +60,24 @@ jobs:
             exit 1
           }
 
+      - name: Install Softwares and Configure Auto-Start
+        run: |
+          # 1. Install WinRAR, Chrome and Office (Word/Excel)
+          # Note: Office install takes time. MS Paint is built-in.
+          choco install winrar googlechrome -y --no-progress
+          choco install office365proplus -y --no-progress --params "'/Quiet'"
+
+          # 2. Configure Auto-Open URL on RDP Login
+          # Hum 'All Users' startup folder use kar rahe hain taki RDP user login karte hi chal jaye
+          $startupPath = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp"
+          $batFile = "$startupPath\OpenYT.bat"
+          
+          # Script to open Chrome with specific URL
+          $content = 'start chrome "https://youtube.com/@factstreamzs?si=MrzcBbz4UPPcs_9q" --new-window --start-maximized'
+          Set-Content -Path $batFile -Value $content -Encoding Ascii
+          
+          Write-Host "Software installed and Auto-Start configured."
+
       - name: Establish Tailscale Connection
         run: |
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
@@ -85,7 +103,7 @@ jobs:
           Write-Host "=========================="
           Write-Host "RDP IP : $env:TAILSCALE_IP"
           Write-Host "USER   : RDP"
-          Write-Host "PASS   : SK"
+          Write-Host "PASS   : SK@12345"
           Write-Host "=========================="
 
           while ($true) {
